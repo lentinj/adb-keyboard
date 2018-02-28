@@ -1,0 +1,108 @@
+#!/usr/bin/python3
+import collections
+import fcntl
+import os
+import subprocess
+import sys
+import termios
+import time
+
+# https://developer.android.com/reference/android/view/KeyEvent.html#contstants
+SPECIAL_KEYS = {
+    0x05: 0x00000041, # c-e    : KEYCODE_ENVELOPE
+    0x08: 0x00000004, # c-bksp : KEYCODE_BACK
+    0x1a: 0x000000df, # c-z    : KEYCODE_SLEEP
+    0x7f: 0x00000043, # bksp   : KEYCODE_DEL
+    0x0d: 0x00000017, # enter  : KEYCODE_DPAD_CENTER
+    0x1b5b31: 0x0000007a, # KEYCODE_MOVE_HOME
+    0x1b5b34: 0x0000007b, # KEYCODE_MOVE_END
+    0x1b5b41: 0x00000013, # KEYCODE_DPAD_UP
+    0x1b5b42: 0x00000014, # KEYCODE_DPAD_DOWN
+    0x1b5b43: 0x00000016, # KEYCODE_DPAD_RIGHT
+    0x1b5b44: 0x00000015, # KEYCODE_DPAD_LEFT
+}
+
+def configure_terminal():
+    """
+    Configure terminal for reading single keypresses
+    https://stackoverflow.com/questions/983354/how-do-i-make-python-to-wait-for-a-pressed-key
+    """
+    fd = sys.stdin.fileno()
+    # save old state
+    flags_save = fcntl.fcntl(fd, fcntl.F_GETFL)
+    attrs_save = termios.tcgetattr(fd)
+    # make raw - the way to do this comes from the termios(3) man page.
+    attrs = list(attrs_save) # copy the stored version to update
+    # iflag
+    attrs[0] &= ~(termios.IGNBRK | termios.BRKINT | termios.PARMRK 
+                  | termios.ISTRIP | termios.INLCR | termios. IGNCR 
+                  | termios.ICRNL | termios.IXON )
+    # oflag
+    attrs[1] &= ~termios.OPOST
+    # cflag
+    attrs[2] &= ~(termios.CSIZE | termios. PARENB)
+    attrs[2] |= termios.CS8
+    # lflag
+    attrs[3] &= ~(termios.ECHONL | termios.ECHO | termios.ICANON
+                  | termios.ISIG | termios.IEXTEN)
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    # turn on non-blocking
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags_save | os.O_NONBLOCK)
+
+    return dict(flags_save=flags_save, attrs_save=attrs_save)
+
+def restore_terminal(term_state):
+    fd = sys.stdin.fileno()
+    termios.tcsetattr(fd, termios.TCSAFLUSH, term_state['attrs_save'])
+    fcntl.fcntl(fd, fcntl.F_SETFL, term_state['flags_save'])
+
+adb_shell = subprocess.Popen(['adb', 'shell'], stdin = subprocess.PIPE, bufsize=1, universal_newlines=True)
+term_state = configure_terminal()
+try:
+    characters = collections.deque()
+    while True:
+        try:
+            for x in sys.stdin.read():
+                characters.append(ord(x))
+        except TypeError:
+            if len(characters) == 0:
+                # Not doing anything, don't busy-wait too much
+                time.sleep(0.3)
+
+        key_command = None
+        while len(characters) > 0:
+            ch = characters.popleft()
+            if ch == 0x1b and len(characters) >= 2 and characters[0] == 0x5b:
+                # Looks like escape code, munge bytes together
+                characters.popleft()
+                ch = 0x1b5b00 + characters.popleft()
+                if len(characters) > 0 and characters[0] == 0x7e:
+                    # Final semi-colon
+                    characters.popleft()
+            #print("Current character 0x%x\r" % ch)
+
+            if key_command is None:
+                # First character of loop, set mode based on first character
+                key_command = 'input keyevent "' if ch in SPECIAL_KEYS else 'input keyboard text "'
+
+            if ch == 0x3: # Ctrl-c: quit program
+                key_command = 'exit'
+                break
+            elif ch in SPECIAL_KEYS and key_command.startswith('input keyevent'):
+                key_command += '" "%d' % SPECIAL_KEYS[ch]
+            elif ch not in SPECIAL_KEYS and key_command.startswith('input keyboard'):
+                key_command += '%s' % chr(ch)
+            else:
+                # In the wrong mode, put it back and fall through
+                characters.appendleft(ch)
+                break
+
+        if key_command == 'exit':
+            print("Exiting...\r")
+            break
+        elif key_command:
+            print(key_command + '"\r')
+            adb_shell.stdin.write(key_command + '"\n')
+finally:
+    restore_terminal(term_state)
+    adb_shell.communicate("exit\n")
