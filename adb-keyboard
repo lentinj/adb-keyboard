@@ -21,6 +21,10 @@ SPECIAL_KEYS = {
     0x1b5b43: 0x00000016, # KEYCODE_DPAD_RIGHT
     0x1b5b44: 0x00000015, # KEYCODE_DPAD_LEFT
 }
+TOUCH_KEYS = {
+    0x10: 'swipe 0 100 1000 100', # c-p: Swipe right
+    0x0e: 'swipe 1000 100 0 100', # c-n: Swipe left
+}
 
 def configure_terminal():
     """
@@ -70,6 +74,7 @@ try:
                 time.sleep(0.3)
 
         key_command = None
+        command_postfix = ""
         while len(characters) > 0:
             ch = characters.popleft()
             if ch == 0x1b and len(characters) >= 2 and characters[0] == 0x5b:
@@ -83,14 +88,21 @@ try:
 
             if key_command is None:
                 # First character of loop, set mode based on first character
-                key_command = 'input keyevent "' if ch in SPECIAL_KEYS else 'input keyboard text "'
+                if ch in SPECIAL_KEYS:
+                    key_command = 'keyevent '
+                elif ch in TOUCH_KEYS:
+                    key_command = 'touchscreen %s' % TOUCH_KEYS[ch]
+                    break # Can't chain touch events
+                else:
+                    key_command = 'keyboard text "'
+                    command_postfix = '"'
 
             if ch == 0x3: # Ctrl-c: quit program
                 key_command = 'exit'
                 break
-            elif ch in SPECIAL_KEYS and key_command.startswith('input keyevent'):
-                key_command += '" "%d' % SPECIAL_KEYS[ch]
-            elif ch not in SPECIAL_KEYS and key_command.startswith('input keyboard'):
+            elif ch in SPECIAL_KEYS and key_command.startswith('keyevent'):
+                key_command += ' %d' % SPECIAL_KEYS[ch]
+            elif ch not in SPECIAL_KEYS and key_command.startswith('keyboard'):
                 key_command += '%s' % chr(ch)
             else:
                 # In the wrong mode, put it back and fall through
@@ -101,8 +113,8 @@ try:
             print("Exiting...\r")
             break
         elif key_command:
-            print(key_command + '"\r')
-            adb_shell.stdin.write(key_command + '"\n')
+            print(key_command + command_postfix + '\r')
+            adb_shell.stdin.write("input " + key_command + command_postfix + '\n')
             time.sleep(0.8)  # TODO: We should be waiting for the prompt to come back ideally
 finally:
     restore_terminal(term_state)
