@@ -103,6 +103,7 @@ try:
         elif key_command:
             print(key_command + '"\r')
             adb_shell.stdin.write(key_command + '"\n')
+            time.sleep(0.8)  # TODO: We should be waiting for the prompt to come back ideally
 finally:
     restore_terminal(term_state)
     adb_shell.communicate("exit\n")
