@@ -25,6 +25,10 @@ TOUCH_KEYS = {
     0x10: 'swipe 0 100 1000 100', # c-p: Swipe right
     0x0e: 'swipe 1000 100 0 100', # c-n: Swipe left
 }
+CONTENT_KEYS = {
+    0x1b5b3233: "insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:0", # F11: Portrait
+    0x1b5b3234: "insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:3", # F12: Reverse-landscape
+}
 
 def configure_terminal():
     """
@@ -81,6 +85,9 @@ try:
                 # Looks like escape code, munge bytes together
                 characters.popleft()
                 ch = 0x1b5b00 + characters.popleft()
+                if len(characters) > 1 and characters[1] == 0x7e:
+                    ch = (ch << 8) + characters.popleft()
+                    characters.popleft()
                 if len(characters) > 0 and characters[0] == 0x7e:
                     # Final semi-colon
                     characters.popleft()
@@ -89,20 +96,23 @@ try:
             if key_command is None:
                 # First character of loop, set mode based on first character
                 if ch in SPECIAL_KEYS:
-                    key_command = 'keyevent '
+                    key_command = 'input keyevent '
                 elif ch in TOUCH_KEYS:
-                    key_command = 'touchscreen %s' % TOUCH_KEYS[ch]
+                    key_command = 'input touchscreen %s' % TOUCH_KEYS[ch]
                     break # Can't chain touch events
+                elif ch in CONTENT_KEYS:
+                    key_command = 'content %s' % CONTENT_KEYS[ch]
+                    break # Can't chain calls
                 else:
-                    key_command = 'keyboard text "'
+                    key_command = 'input keyboard text "'
                     command_postfix = '"'
 
             if ch == 0x3: # Ctrl-c: quit program
                 key_command = 'exit'
                 break
-            elif ch in SPECIAL_KEYS and key_command.startswith('keyevent'):
+            elif ch in SPECIAL_KEYS and key_command.startswith('input keyevent'):
                 key_command += ' %d' % SPECIAL_KEYS[ch]
-            elif ch not in SPECIAL_KEYS and key_command.startswith('keyboard'):
+            elif ch not in SPECIAL_KEYS and key_command.startswith('input keyboard'):
                 key_command += '%s' % chr(ch)
             else:
                 # In the wrong mode, put it back and fall through
@@ -114,7 +124,7 @@ try:
             break
         elif key_command:
             print(key_command + command_postfix + '\r')
-            adb_shell.stdin.write("input " + key_command + command_postfix + '\n')
+            adb_shell.stdin.write(key_command + command_postfix + '\n')
             time.sleep(0.8)  # TODO: We should be waiting for the prompt to come back ideally
 finally:
     restore_terminal(term_state)
