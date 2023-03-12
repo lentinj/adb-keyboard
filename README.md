@@ -1,3 +1,6 @@
+**NB:** This is kinda pointless in comparison to scrcpy, in particular the HID/OTG mode:
+https://github.com/Genymobile/scrcpy/blob/master/doc/hid-otg.md
+
 # Interactive ADB keyboard
 
 Small script to send keypresses over an ADB shell to any Android phone, e.g. to use your laptop keyboard to compose SMS.
